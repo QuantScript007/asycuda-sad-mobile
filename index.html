@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#EC4899">
+<meta name="description" content="Generate ASYCUDA SAD import files on your phone — works offline, files never leave your device.">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="SAD Mobile">
+<title>SAD Mobile — ASYCUDA SAD Generator</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icons/icon-192.png">
+<link rel="stylesheet" href="css/app.css">
+</head>
+<body>
+
+<header class="appbar">
+  <div class="appbar-brand">
+    <div class="logo">SAD</div>
+    <div>
+      <div class="appbar-title">SAD Mobile</div>
+      <div class="appbar-sub" id="appSub">ASYCUDA SAD generator</div>
+    </div>
+  </div>
+  <div class="appbar-actions">
+    <button class="icon-btn" id="installBtn" hidden title="Install app">⤓</button>
+    <button class="icon-btn" id="themeBtn" title="Dark / light">🌙</button>
+  </div>
+</header>
+
+<main id="main">
+
+  <!-- ───────── FILE TAB ───────── -->
+  <section class="view active" id="view-file">
+    <div class="hero">
+      <h1>Generate a SAD on your phone</h1>
+      <p>Open your filled SAD model or template, check the figures, and download the ASYCUDA file. Nothing is uploaded — it all runs on this device.</p>
+      <div class="hero-stats">
+        <div><b id="statFiles">0</b><span>made</span></div>
+        <div><b id="statToday">0</b><span>today</span></div>
+        <div><b id="statDuty">–</b><span>last duty</span></div>
+      </div>
+    </div>
+
+    <label class="pick" id="pickCard">
+      <input type="file" id="fileInput" accept=".xls,.xlsx,.xlsm,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet">
+      <div class="pick-icon">📁</div>
+      <div class="pick-title">Choose Excel file</div>
+      <div class="pick-sub">SAD model, simple template or a previous SAD · .xls / .xlsx</div>
+    </label>
+
+    <div class="row-btns">
+      <button class="btn ghost" data-go="form">✍️ Enter by hand instead</button>
+      <button class="btn ghost" id="sampleBtn">🧪 Try sample data</button>
+    </div>
+
+    <!-- Review (filled after a file is read or the form is submitted) -->
+    <div id="review" hidden>
+      <div class="chip-file"><span class="chip-badge">XLS</span><span id="reviewName" class="ellipsis"></span><button class="link" id="clearReview">✕</button></div>
+      <div id="reviewWarnings"></div>
+
+      <div class="card">
+        <div class="card-h"><h2>Shipment</h2><span class="muted" id="reviewBl"></span></div>
+        <div class="kv-grid" id="reviewGeneral"></div>
+      </div>
+
+      <div class="seg" id="prefSeg" role="tablist" aria-label="Tariff">
+        <button class="active" data-pref="general">General</button>
+        <button data-pref="safta">SAFTA</button>
+        <button data-pref="cmfta">CMFTA</button>
+      </div>
+
+      <div id="dash"></div>
+
+      <div class="card">
+        <div class="card-h"><h2>Line items</h2><span class="muted" id="itemsCount"></span></div>
+        <p class="hint">Tap a rate to type the duty % from the tariff. 🔎 opens the Maldives Customs tariff search.</p>
+        <div id="itemsList" class="items"></div>
+      </div>
+      <div class="spacer"></div>
+    </div>
+  </section>
+
+  <!-- ───────── FORM TAB ───────── -->
+  <section class="view" id="view-form">
+    <div class="card">
+      <div class="card-h"><h2>Shipment</h2><button class="link" id="formSample">Fill sample</button></div>
+      <div class="form-grid" id="formGeneral"></div>
+      <details class="more">
+        <summary>Codes &amp; costs</summary>
+        <div class="form-grid" id="formGeneralMore"></div>
+      </details>
+    </div>
+    <div class="card">
+      <div class="card-h"><h2>Items</h2><span class="muted" id="formItemsCount">0</span></div>
+      <div id="formItems"></div>
+      <button class="btn ghost full" id="addItem">＋ Add item</button>
+    </div>
+    <div class="row-btns">
+      <button class="btn ghost" id="formClear">Clear form</button>
+      <button class="btn primary" id="formReview">Review &amp; generate →</button>
+    </div>
+    <p class="hint center">The form is saved on this phone as you type.</p>
+    <div class="spacer"></div>
+  </section>
+
+  <!-- ───────── HISTORY TAB ───────── -->
+  <section class="view" id="view-history">
+    <div class="history-stats" id="historyStats"></div>
+    <div id="historyList"></div>
+    <p class="hint center" id="storageInfo"></p>
+    <div class="spacer"></div>
+  </section>
+
+  <!-- ───────── HELP TAB ───────── -->
+  <section class="view" id="view-help">
+    <div class="card">
+      <h2>Blank files</h2>
+      <div class="stack-btns">
+        <button class="btn primary" data-dl="model">⬇ SAD Model (.xls)</button>
+        <button class="btn ghost" data-dl="model-sample">SAD Model with sample rows</button>
+        <button class="btn ghost" data-dl="simple">Simple template (.xls)</button>
+      </div>
+    </div>
+    <div class="card steps">
+      <h2>How it works</h2>
+      <ol>
+        <li><b>Fill</b> the SAD model (or simple template) in Excel, WPS or Google Sheets — or use the <b>Form</b> tab.</li>
+        <li><b>Open</b> it on the File tab. Check the insights and type any missing duty rates.</li>
+        <li><b>Generate</b> and download or share the SAD. It is the official model, filled in — ready to import into ASYCUDA.</li>
+      </ol>
+    </div>
+    <div class="card">
+      <h2>Good to know</h2>
+      <ul class="bullets">
+        <li><b>Private:</b> files are read and created on this phone only. Nothing is uploaded.</li>
+        <li><b>Offline:</b> after the first visit the app works without internet. Add it to your home screen from the browser menu.</li>
+        <li><b>Duty rates:</b> come from your file or what you type — the phone can't look them up automatically. Use 🔎 to open the customs tariff.</li>
+        <li><b>Limits (ASYCUDA):</b> description 49 characters, brand/model/size 24, packing codes 5 — longer text is shortened with a warning.</li>
+      </ul>
+    </div>
+    <p class="hint center" id="versionInfo"></p>
+    <div class="spacer"></div>
+  </section>
+</main>
+
+<!-- Sticky action -->
+<div class="action-bar" id="actionBar" hidden>
+  <div class="action-sum"><b id="actionTotal">0.00</b><span id="actionSub">duty</span></div>
+  <button class="btn primary big" id="generateBtn">⚡ Generate SAD</button>
+</div>
+
+<!-- Bottom navigation -->
+<nav class="tabbar">
+  <button class="active" data-go="file"><span>📁</span>File</button>
+  <button data-go="form"><span>✍️</span>Form</button>
+  <button data-go="history"><span>🗂</span>History</button>
+  <button data-go="help"><span>❓</span>Help</button>
+</nav>
+
+<!-- Result sheet -->
+<div class="sheet-backdrop" id="sheet" hidden>
+  <div class="sheet">
+    <div class="sheet-grip"></div>
+    <div class="result-head">
+      <div class="result-icon">✓</div>
+      <div><h2>SAD ready</h2><div class="muted" id="resultSub"></div></div>
+    </div>
+    <div id="resultWarnings"></div>
+    <div class="result-kpis" id="resultKpis"></div>
+    <div class="stack-btns">
+      <button class="btn primary big" id="dlSad">⬇ Download SAD (ASYCUDA model)</button>
+      <button class="btn ghost" id="dlDuty">📊 Download duty worksheet</button>
+      <button class="btn share" id="shareBtn" hidden>📤 Share (WhatsApp, email…)</button>
+    </div>
+    <button class="btn link full" id="closeSheet">Close</button>
+  </div>
+</div>
+
+<div class="toast" id="toast" hidden></div>
+
+<script src="vendor/xlsx.full.min.js"></script>
+<script type="module" src="js/app.js"></script>
+</body>
+</html>

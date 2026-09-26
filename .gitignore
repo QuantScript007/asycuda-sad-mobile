@@ -1,0 +1,7 @@
+node_modules/
+.DS_Store
+Thumbs.db
+# Generated SAD files may contain real shipment data
+SAD_*.xls
+SAD_*.xlsx
+!templates/SAD_MODEL.xls
