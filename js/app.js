@@ -1,12 +1,13 @@
 import * as core from './sad-core.js';
 import { history, local } from './store.js';
 
-export const VERSION = '1.0.0';
+export const VERSION = '1.1.0';
 const $ = (id) => document.getElementById(id);
 const XLS_MIME = 'application/vnd.ms-excel';
 const TARIFF_URL = 'https://www.customs.gov.mv/eServices/findtariff?hsSearchIn=';
 
-const state = { data: null, source: '', preferential: 'general', result: null, shown: 40 };
+const state = { data: null, source: '', preferential: 'general', result: null, shown: 40, fx: null };
+const curOf = () => String((state.data && state.data.general.invoice_currency) || 'USD').toUpperCase();
 let modelBytes = null;
 
 // ── Utilities ────────────────────────────────────────────────
@@ -78,6 +79,11 @@ $('themeBtn').onclick = () => { const t = document.documentElement.dataset.theme
 function setData(data, source) {
   state.data = { general: { ...data.general }, items: data.items.map((it) => ({ ...it })) };
   state.source = source; state.shown = 40;
+  const cur = curOf();
+  const saved = (local.get('fx') || {})[cur];
+  state.fx = core.parseNumber(data.general.exchange_rate, null) || saved || core.DEFAULT_RATES[cur] || null;
+  $('fxInput').value = state.fx ?? '';
+  $('fxHint').textContent = `MVR per 1 ${cur} · ${core.parseNumber(data.general.exchange_rate, null) ? 'from your file' : saved ? 'last used' : state.fx ? 'default — check today\'s rate' : 'enter from Customs'}`;
   $('review').hidden = false;
   $('reviewName').textContent = source;
   renderReview();
@@ -106,13 +112,19 @@ function renderReview() {
 function renderDashboard() {
   const { general: g, items } = state.data;
   const cur = g.invoice_currency || '';
-  const a = core.buildAnalytics(g, items, state.preferential);
-  const t = a.totals, cb = a.cost_breakdown, rec = a.reconciliation;
-  $('actionTotal').textContent = money(t.duty, cur);
-  $('actionSub').textContent = `duty · ${t.items} item(s) · ${state.preferential.toUpperCase()}`;
+  const a = core.buildAnalytics(g, items, state.preferential, state.fx);
+  const t = a.totals, cb = a.cost_breakdown, rec = a.reconciliation, m = a.mvr;
+  $('actionTotal').textContent = m ? money(m.payable, 'MVR') : money(t.duty, cur);
+  $('actionSub').textContent = m ? `payable · duty ${num(m.duty, 0)} + rev. ${num(m.revenue, 0)}` : `duty · ${t.items} item(s) · ${state.preferential.toUpperCase()}`;
 
   const kpi = (i, l, v, s, gr) => `<div class="kpi" style="background:${gr}"><div class="i">${i}</div><div class="l">${l}</div><div class="v">${v}</div>${s ? `<div class="s">${s}</div>` : ''}</div>`;
-  const kpis = [
+  const mvrKpis = m ? [
+    kpi('🇲🇻', 'Duty (MVR)', money(m.duty, 'MVR'), `price × duty% × ${m.exchange_rate}`, 'linear-gradient(135deg,#DC2626,#EC4899)'),
+    kpi('🏦', 'Revenue 1% (MVR)', money(m.revenue, 'MVR'), `price × ${m.exchange_rate} × 1%`, 'linear-gradient(135deg,#0EA5E9,#6366F1)'),
+    kpi('💳', 'Total payable', money(m.payable, 'MVR'), 'duty + revenue', 'linear-gradient(135deg,#16A34A,#0D9488)'),
+    kpi('💱', 'Goods in MVR', money(m.goods, 'MVR'), `${money(t.item_value, cur)} × ${m.exchange_rate}`, 'linear-gradient(135deg,#64748B,#334155)'),
+  ].join('') : '';
+  const kpis = mvrKpis + [
     kpi('💰', 'Goods value', money(t.item_value, cur), t.value_per_kg ? `${money(t.value_per_kg)} / kg` : `${t.items} item(s)`, GRADS[0]),
     kpi('🏛', 'Customs duty', money(t.duty, cur), `effective ${num(t.effective_rate, 2)}%`, GRADS[4]),
     kpi('🚢', 'CIF value', money(cb.cif, cur), 'incl. freight & insurance', GRADS[5]),
@@ -177,7 +189,7 @@ function renderItems() {
   const shown = items.slice(0, state.shown);
   const key = { general: 'duty_rate', safta: 'safta_rate', cmfta: 'cmfta_rate' }[state.preferential];
   $('itemsList').innerHTML = shown.map((it, i) => {
-    const d = core.calculateItemDuty(it, state.preferential);
+    const d = core.calculateItemDuty(it, state.preferential, state.fx);
     const hs = core.normalizeHs(it.hs_code);
     const desc = String(it.description ?? it.commercial_description ?? '');
     const q = encodeURIComponent(hs || desc.slice(0, 40));
@@ -194,7 +206,7 @@ function renderItems() {
         <div><label>${state.preferential === 'general' ? 'Duty %' : state.preferential.toUpperCase() + ' %'}</label>
           <input class="rate-in" inputmode="decimal" data-i="${i}" value="${esc(rateVal ?? '')}" placeholder="${state.preferential !== 'general' && it.duty_rate != null ? it.duty_rate : '—'}"></div>
         <div style="text-align:right"><label>Duty</label><div class="n" style="color:var(--pink)">${money(d.duty_amount)}</div></div>
-      </div></div>`;
+      </div>${d.duty_mvr !== undefined ? `<div class="mvr-line"><span>Duty <b>${money(d.duty_mvr, 'MVR')}</b></span><span>Revenue <b>${money(d.revenue_mvr, 'MVR')}</b></span></div>` : ''}</div>`;
   }).join('') + (items.length > state.shown ? `<div class="more-items"><button class="btn ghost" id="showMore">Show ${Math.min(40, items.length - state.shown)} more (${items.length - state.shown} hidden)</button></div>` : '');
   const more = $('showMore');
   if (more) more.onclick = () => { state.shown += 40; renderItems(); };
@@ -206,6 +218,15 @@ function renderItems() {
   }));
   void cur;
 }
+
+$('fxInput').addEventListener('change', () => {
+  const v = core.parseNumber($('fxInput').value, null);
+  state.fx = v && v > 0 ? v : null;
+  const all = local.get('fx') || {};
+  if (state.fx) { all[curOf()] = state.fx; local.set('fx', all); }
+  $('fxHint').textContent = `MVR per 1 ${curOf()} · ${state.fx ? 'saved on this phone' : 'enter from Customs'}`;
+  if (state.data) { renderDashboard(); renderItems(); }
+});
 
 $('prefSeg').addEventListener('click', (e) => {
   const b = e.target.closest('button'); if (!b) return;
@@ -237,7 +258,7 @@ $('generateBtn').onclick = async () => {
   try {
     await new Promise((r) => setTimeout(r, 30)); // let the button repaint
     const model = await loadModel();
-    const res = core.generate(model, state.data, state.preferential);
+    const res = core.generate(model, state.data, state.preferential, state.fx);
     state.result = res;
     const cur = res.general.invoice_currency || '';
     const t = res.analytics.totals;
@@ -245,6 +266,7 @@ $('generateBtn').onclick = async () => {
       id: res.sad.name, created: Date.now(), name: res.sad.name, duty_name: res.duty.name,
       bl: res.general.bl_number || '', vessel: res.general.vessel_name || '', items: t.items,
       value: t.item_value, duty: t.duty, currency: cur, preferential: res.preferential,
+      exchange_rate: res.exchange_rate, payable_mvr: res.analytics.mvr ? res.analytics.mvr.payable : null,
       sad: new Blob([res.sad.bytes], { type: XLS_MIME }), dutySheet: new Blob([res.duty.bytes], { type: XLS_MIME }),
     }).then(() => history.trim(30)).catch((e2) => console.warn('history not saved', e2));
     showResult(res);
@@ -263,10 +285,17 @@ function showResult(res) {
   $('resultSub').textContent = `${t.items} item(s) · ${res.preferential.toUpperCase()} tariff · ${res.sad.name}`;
   $('resultWarnings').innerHTML = res.warnings.length
     ? `<div class="alert warn">⚠ <span>${res.warnings.slice(0, 6).map(esc).join('<br>')}${res.warnings.length > 6 ? `<br>…and ${res.warnings.length - 6} more` : ''}</span></div>` : '';
-  $('resultKpis').innerHTML = `<div class="kpis">
-    <div class="kpi" style="background:var(--g-warm)"><div class="l">Goods</div><div class="v">${money(t.item_value, cur)}</div></div>
-    <div class="kpi" style="background:var(--g-berry)"><div class="l">Duty</div><div class="v">${money(t.duty, cur)}</div><div class="s">${num(t.effective_rate, 2)}%</div></div>
-    <div class="kpi" style="background:var(--g-fresh)"><div class="l">Landed</div><div class="v">${money(cb.landed, cur)}</div></div></div>`;
+  const m = res.analytics.mvr;
+  $('resultKpis').innerHTML = m ? `<div class="kpis mini">
+    <div class="kpi" style="background:linear-gradient(135deg,#DC2626,#EC4899)"><div class="l">Duty MVR</div><div class="v">${money(m.duty)}</div></div>
+    <div class="kpi" style="background:linear-gradient(135deg,#0EA5E9,#6366F1)"><div class="l">Revenue 1%</div><div class="v">${money(m.revenue)}</div></div>
+    <div class="kpi" style="background:linear-gradient(135deg,#16A34A,#0D9488)"><div class="l">Payable MVR</div><div class="v">${money(m.payable)}</div></div></div>
+    <div class="result-usd">Goods ${money(t.item_value, cur)} · duty ${money(t.duty, cur)} (${num(t.effective_rate, 2)}%) · rate ${m.exchange_rate} MVR/${esc(cur)}</div>`
+    : `<div class="kpis mini">
+    <div class="kpi" style="background:var(--g-warm)"><div class="l">Goods</div><div class="v">${money(t.item_value)}</div></div>
+    <div class="kpi" style="background:var(--g-berry)"><div class="l">Duty</div><div class="v">${money(t.duty)}</div></div>
+    <div class="kpi" style="background:var(--g-fresh)"><div class="l">Landed</div><div class="v">${money(cb.landed)}</div></div></div>
+    <div class="result-usd">Amounts in ${esc(cur || 'invoice currency')} — add an MVR rate to see duty and revenue in MVR.</div>`;
   $('shareBtn').hidden = !canShareFiles();
   $('sheet').hidden = false;
 }
@@ -281,6 +310,7 @@ const FORM_MAIN = [
   ['bl_number', 'BL number', 'text', true], ['vessel_name', 'Vessel', 'text', true], ['exporter', 'Exporter', 'text', true],
   ['consignee_code', 'Consignee code', 'text'], ['country_of_export', 'Export country', 'text'], ['trading_country', 'Trading country', 'text'],
   ['delivery_terms', 'Delivery terms', 'text'], ['invoice_amount', 'Invoice total', 'number'], ['invoice_currency', 'Currency', 'text'],
+  ['exchange_rate', 'MVR rate (Customs)', 'number'],
 ];
 const FORM_MORE = [
   ['manifest_no', 'Manifest no.', 'text'], ['customs_office', 'Customs office', 'text'], ['office_entry_exit', 'Office of entry', 'text'],
@@ -298,7 +328,7 @@ const ITEM_FIELDS = [
   ['no_packages', 'Packages', 'number'], ['brand', 'Brand', 'text'], ['model', 'Model', 'text'],
 ];
 const PLACEHOLDERS = { customs_office: '00MP', decl_type: 'IM', decl_subtype: '4', procedure: '4000', procedure_add: '000', delivery_terms: 'CIF',
-  invoice_currency: 'USD', consignee_code: 'C8888', declarant_code: 'C8888', mode_transport: '1', carrier_nationality: 'MV', country_of_export: 'CN', country_origin: 'CN' };
+  invoice_currency: 'USD', exchange_rate: '15.42', consignee_code: 'C8888', declarant_code: 'C8888', mode_transport: '1', carrier_nationality: 'MV', country_of_export: 'CN', country_origin: 'CN' };
 
 const field = ([k, label, type, wide], val, attr) => `<div class="field${wide ? ' wide' : ''}"><label>${label}</label>
   <input ${attr}="${k}" type="${type === 'number' ? 'text' : type}" ${type === 'number' ? 'inputmode="decimal"' : ''} ${type === 'tel' ? 'inputmode="numeric"' : ''}
@@ -372,7 +402,7 @@ async function renderHistory() {
   $('historyList').innerHTML = list.length ? list.map((e, i) => `<div class="h-item">
     <div class="h-top"><div class="h-badge" style="background:${GRADS[i % GRADS.length]}">SAD</div>
       <div style="min-width:0"><div class="h-name">${esc(e.name)}</div>
-      <div class="h-meta">${new Date(e.created).toLocaleString()} · ${e.items} item(s) · duty ${money(e.duty, e.currency)} · ${esc((e.preferential || 'general').toUpperCase())}</div></div></div>
+      <div class="h-meta">${new Date(e.created).toLocaleString()} · ${e.items} item(s) · duty ${money(e.duty, e.currency)}${e.payable_mvr != null ? ` · payable ${money(e.payable_mvr, 'MVR')}` : ''} · ${esc((e.preferential || 'general').toUpperCase())}</div></div></div>
     <div class="h-btns"><button class="btn primary" data-h="sad" data-id="${esc(e.id)}">⬇ SAD</button><button class="btn ghost" data-h="duty" data-id="${esc(e.id)}">📊 Duty</button>
       ${canShareFiles() ? `<button class="btn ghost" data-h="share" data-id="${esc(e.id)}">📤</button>` : ''}<button class="btn ghost" data-h="del" data-id="${esc(e.id)}">🗑</button></div></div>`).join('')
     : '<div class="empty"><div class="e">🗂</div>No SAD files yet.<br>Generated files are kept here on this phone.</div>';

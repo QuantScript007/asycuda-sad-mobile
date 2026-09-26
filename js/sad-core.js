@@ -50,7 +50,34 @@ const round2 = (n) => Math.round((n + Number.EPSILON) * 100) / 100;
 // ── Duty ─────────────────────────────────────────────────────
 export const PREFERENTIAL_KEYS = { general: 'duty_rate', safta: 'safta_rate', cmfta: 'cmfta_rate' };
 
-export function calculateItemDuty(item, preferential = 'general') {
+// Revenue charged per item = price × MVR rate × REVENUE_RATE (1%)
+export const REVENUE_RATE = 0.01;
+// MVR is pegged to USD; 15.42 is the long-standing customs valuation rate.
+export const DEFAULT_RATES = { USD: 15.42, MVR: 1 };
+export const FX_URL = 'https://customs.gov.mv/eServices/exchangeRate';
+
+/**
+ * Duty for one item with the chosen tariff column.
+ *   duty_amount = price × duty%                    (invoice currency)
+ *   value_mvr   = price × MVR rate
+ *   duty_mvr    = price × duty% × MVR rate
+ *   revenue_mvr = price × MVR rate × 1%
+ * MVR figures only when fxRate is given.
+ */
+export function calculateItemDuty(item, preferential = 'general', fxRate = null) {
+  const out = calcDuty(item, preferential);
+  const fx = parseNumber(fxRate, null);
+  if (fx) {
+    const price = parseNumber(item.item_price, 0);
+    out.value_mvr = round2(price * fx);
+    out.duty_mvr = round2(price * (out.duty_rate || 0) / 100 * fx);
+    out.revenue_mvr = round2(price * fx * REVENUE_RATE);
+    out.payable_mvr = round2(out.duty_mvr + out.revenue_mvr);
+  }
+  return out;
+}
+
+function calcDuty(item, preferential) {
   let rate = parseRate(item[PREFERENTIAL_KEYS[preferential] || 'duty_rate']);
   if (rate === null && preferential !== 'general') rate = parseRate(item.duty_rate);
   const price = parseNumber(item.item_price, 0);
@@ -118,7 +145,7 @@ function groupRows(groups, totalValue, limit) {
 const itemDesc = (it) => String(it.description ?? it.commercial_description ?? '');
 const itemOrigin = (it) => String(it.country_origin ?? it.country_of_origin ?? '').trim().toUpperCase();
 
-export function buildAnalytics(general, items, preferential = 'general') {
+export function buildAnalytics(general, items, preferential = 'general', fxRate = null) {
   const g = general || {};
   const byOrigin = new Map(), byChapter = new Map(), bands = {};
   const sources = { manual: 0, auto: 0, missing: 0 };
@@ -150,7 +177,14 @@ export function buildAnalytics(general, items, preferential = 'general') {
   const cif = goods + ext + intl + ins + other - ded;
   const diff = invoice === null ? null : round2(totalValue - invoice);
   const rated = dutyRows.filter((r) => r.duty_rate !== null);
+  const fx = parseNumber(fxRate, null);
+  const mvr = fx ? {
+    exchange_rate: fx, revenue_rate: REVENUE_RATE, goods: round2(totalValue * fx), cif: round2(cif * fx),
+    duty: round2(totalDuty * fx), revenue: round2(totalValue * fx * REVENUE_RATE),
+    payable: round2(totalDuty * fx + totalValue * fx * REVENUE_RATE),
+  } : null;
   return {
+    mvr,
     totals: {
       items: items.length, item_value: round2(totalValue), duty: round2(totalDuty),
       effective_rate: totalValue ? round2(100 * totalDuty / totalValue) : 0,
@@ -388,7 +422,7 @@ export function blankSadModel(modelBytes) {
 }
 
 // ── Duty worksheet (same layout as the desktop app's) ────────
-export function buildDutySheet(data, preferential = 'general') {
+export function buildDutySheet(data, preferential = 'general', fxRate = null) {
   const XLSX = X();
   const g = data.general || {}, items = data.items || [];
   const gv = (k, d = '') => (empty(g[k]) ? d : g[k]);
@@ -413,20 +447,23 @@ export function buildDutySheet(data, preferential = 'general') {
     ['27', 'Place of Discharge', String(gv('place_discharge'))], ['18', 'Carrier Nationality', gv('carrier_nationality', 'MV')],
     ['11', 'Trading Country', gv('trading_country')], ['6', 'Total No. of Package', num(gv('total_packages', 0)) || 0],
   ];
+  const fx = parseNumber(fxRate, null);
   const head1 = ['Field Nbr', '33', '41', '34', '35', '36', '42', 'Valuation', '43 V.M.', '43 D.Val', '43 D.aty', '43 NPR',
     '47 Type', '47 Base', '47 Rate', '47 Amount', '', '', '', '', '', '31 Packages and description of goods'];
   const head2 = ['Item\nnumber', 'Commodity\ncode', 'Supplementary\nunits', 'Country\nof origin', 'Gross mass', 'Preference',
     'Item\nprice', 'Internal\nFreight', 'Valuation\nMethod (V.M.)', 'Customs\nValue (D.Val)', 'Duty Rate\n(%) (D.aty)',
     'Duty Amount\n(NPR)', 'Tax Type\n(IPV/RVF)', 'Tax\nBase', 'Tax Rate\n(%)', 'Tax\nAmount', 'External\nFreight', 'Insurance',
     'Other\ncosts', 'Deductions', 'Unit Nos', 'Commercial Description of Goods', 'Packing 1st', 'Packing Code 1',
-    'Packing 3rd', 'Packing Code 2', 'Brand', 'Model', 'Size', 'Package Code', 'No. of\nPackages'];
+    'Packing 3rd', 'Packing Code 2', 'Brand', 'Model', 'Size', 'Package Code', 'No. of\nPackages',
+    'Exchange\nrate (MVR)', 'Value\n(MVR)', 'Duty (MVR)\nprice×duty%×rate', 'Revenue (MVR)\nprice×rate×1%', 'Payable (MVR)\nduty+revenue'];
   const rows = [[], head1, head2];
   let totalPrice = 0, totalDuty = 0;
+  const mt = { value_mvr: 0, duty_mvr: 0, revenue_mvr: 0, payable_mvr: 0 };
   items.forEach((it, i) => {
-    const d = calculateItemDuty(it, preferential);
+    const d = calculateItemDuty(it, preferential, fx);
     const ip = num(it.item_price);
     totalPrice += ip || 0; totalDuty += d.duty_amount;
-    const row = new Array(31).fill('');
+    const row = new Array(36).fill('');
     Object.assign(row, {
       0: i + 1, 1: normalizeHs(it.hs_code), 2: num(it.supp_units), 3: String(it.country_origin ?? it.country_of_origin ?? ''),
       4: num(it.gross_mass), 5: it.preference ?? '', 6: ip, 7: num(it.int_freight ?? it.internal_freight), 8: '1',
@@ -436,13 +473,23 @@ export function buildDutySheet(data, preferential = 'general') {
       27: String(it.model ?? ''), 28: String(it.size ?? ''), 29: String(it.package_code ?? ''), 30: num(it.no_packages ?? it.no_of_packages),
     });
     if (d.duty_amount > 0) Object.assign(row, { 11: d.duty_amount, 12: 'IPV', 13: ip, 14: d.duty_rate, 15: d.duty_amount });
+    if (fx) {
+      Object.assign(row, { 31: fx, 32: d.value_mvr, 33: d.duty_mvr, 34: d.revenue_mvr, 35: d.payable_mvr });
+      for (const k of Object.keys(mt)) mt[k] += d[k];
+    }
     rows.push(row);
   });
-  const totals = new Array(31).fill('');
+  const totals = new Array(36).fill('');
   Object.assign(totals, { 0: 'TOTAL', 6: round2(totalPrice), 11: round2(totalDuty), 15: round2(totalDuty) });
+  if (fx) {
+    Object.assign(totals, { 32: round2(mt.value_mvr), 33: round2(mt.duty_mvr), 34: round2(mt.revenue_mvr), 35: round2(mt.payable_mvr) });
+    gen.push([], ['', 'Exchange rate (MVR per unit)', fx, gv('invoice_currency', 'USD')],
+      ['', 'Total duty (MVR)', round2(mt.duty_mvr)], ['', 'Total revenue 1% (MVR)', round2(mt.revenue_mvr)],
+      ['', 'Total payable (MVR)', round2(mt.payable_mvr)]);
+  }
   rows.push(totals);
   const wb = XLSX.utils.book_new();
-  const ws1 = XLSX.utils.aoa_to_sheet(gen);
+  const ws1 = XLSX.utils.aoa_to_sheet(gen);  // built after the MVR summary rows are added
   ws1['!cols'] = [{ wch: 16 }, { wch: 26 }, { wch: 34 }, { wch: 12 }];
   const ws2 = XLSX.utils.aoa_to_sheet(rows);
   ws2['!cols'] = head2.map((_, c) => ({ wch: c === 21 ? 44 : 13 }));
@@ -472,7 +519,7 @@ export function buildSimpleTemplate() {
 }
 
 // ── One-shot generate ────────────────────────────────────────
-export function generate(modelBytes, data, preferential = 'general') {
+export function generate(modelBytes, data, preferential = 'general', fxRate = null) {
   const general = { ...(data.general || {}) };
   const items = (data.items || []).map((it) => {
     const x = { ...it, hs_code: normalizeHs(it.hs_code) };
@@ -485,7 +532,9 @@ export function generate(modelBytes, data, preferential = 'general') {
   if (!items.length) throw new Error('No items found.');
   const payload = { general, items };
   const model = fillSadModel(modelBytes, payload);
-  const duty = buildDutySheet(payload, preferential);
+  const fx = parseNumber(fxRate, null) || parseNumber(general.exchange_rate, null) ||
+    DEFAULT_RATES[String(general.invoice_currency || 'USD').toUpperCase()] || null;
+  const duty = buildDutySheet(payload, preferential, fx);
   const d = new Date(), p2 = (n) => String(n).padStart(2, '0');
   const stamp = `${d.getFullYear()}${p2(d.getMonth() + 1)}${p2(d.getDate())}_${p2(d.getHours())}${p2(d.getMinutes())}${p2(d.getSeconds())}`;
   const base = `SAD_${safeFilenamePart(general.bl_number, 'manual')}_${stamp}`;
@@ -493,8 +542,10 @@ export function generate(modelBytes, data, preferential = 'general') {
     general, items,
     sad: { name: `${base}.xls`, bytes: model.bytes },
     duty: { name: `${base}_duty.xls`, bytes: duty },
-    warnings: [...validate(payload), ...model.warnings],
-    analytics: buildAnalytics(general, items, preferential),
+    warnings: [...validate(payload), ...model.warnings,
+      ...(fx ? [] : [`No MVR exchange rate for ${general.invoice_currency || 'USD'} — enter it to see duty and revenue in MVR.`])],
+    analytics: buildAnalytics(general, items, preferential, fx),
     preferential,
+    exchange_rate: fx,
   };
 }

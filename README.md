@@ -30,6 +30,18 @@ Generate **ASYCUDA SAD import files on a phone**, in the browser. Open a filled 
 | **🗂 History** | The last 30 generated SADs, kept on the phone — download, share or delete. |
 | **❓ Help** | Blank SAD model, model with sample rows, simple template. |
 
+### Duty and revenue in MVR
+
+With the **MVR exchange rate** (Maldives Customs rate, [customs.gov.mv/eServices/exchangeRate](https://customs.gov.mv/eServices/exchangeRate)) each item gets:
+
+| | Formula |
+|---|---|
+| **Duty (MVR)** | item price × duty % × MVR rate |
+| **Revenue (MVR)** | item price × MVR rate × 0.01 |
+| **Payable (MVR)** | duty + revenue |
+
+The rate comes from an `exchange_rate` value in your file, the rate you last used for that currency, or 15.42 for USD — type today's rate in the box on the review screen (tap **Check ↗** to open the Customs page). A phone browser isn't allowed to read the Customs site directly, so the rate can't be fetched automatically here; the desktop app does fetch it. The duty worksheet gets *Exchange rate, Value, Duty, Revenue* and *Payable (MVR)* columns plus totals.
+
 ASYCUDA field limits from the model are applied with a warning: description 49 characters, brand / model / size 24, packing codes 5.
 
 ### Duty rates

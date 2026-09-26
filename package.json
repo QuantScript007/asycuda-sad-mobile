@@ -1,6 +1,6 @@
 {
   "name": "asycuda-sad-mobile",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Mobile web app: generate ASYCUDA SAD files on your phone",
   "directories": {
     "test": "tests"
