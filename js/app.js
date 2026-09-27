@@ -1,7 +1,8 @@
 import * as core from './sad-core.js';
 import { history, local } from './store.js';
+import * as scan from './scan.js';
 
-export const VERSION = '1.1.0';
+export const VERSION = '1.2.0';
 const $ = (id) => document.getElementById(id);
 const XLS_MIME = 'application/vnd.ms-excel';
 const TARIFF_URL = 'https://www.customs.gov.mv/eServices/findtariff?hsSearchIn=';
@@ -62,6 +63,7 @@ function go(tab) {
   document.querySelectorAll('.tabbar button').forEach((b) => b.classList.toggle('active', b.dataset.go === tab));
   $('actionBar').hidden = !(tab === 'file' && state.data);
   if (tab === 'history') renderHistory();
+  updatePagesFab(tab);
   window.scrollTo({ top: 0 });
 }
 document.querySelectorAll('[data-go]').forEach((b) => b.addEventListener('click', () => go(b.dataset.go)));
@@ -325,30 +327,52 @@ const FORM_MORE = [
 const ITEM_FIELDS = [
   ['description', 'Description', 'text', true], ['hs_code', 'HS code', 'tel'], ['country_origin', 'Origin', 'text'],
   ['item_price', 'Price', 'number'], ['duty_rate', 'Duty %', 'number'], ['gross_mass', 'Gross kg', 'number'],
-  ['no_packages', 'Packages', 'number'], ['brand', 'Brand', 'text'], ['model', 'Model', 'text'],
+  ['no_packages', 'Packages', 'number'], ['supp_units', 'Qty (box 41)', 'number'], ['brand', 'Brand', 'text'], ['model', 'Model', 'text'],
 ];
+const ITEM_KEYS = new Set(ITEM_FIELDS.map((f) => f[0]));
+const GENERAL_KEYS = new Set([...FORM_MAIN, ...FORM_MORE].map((f) => f[0]));
+const extras = (o, keys) => Object.fromEntries(Object.entries(o || {}).filter(([k]) => !keys.has(k)));
 const PLACEHOLDERS = { customs_office: '00MP', decl_type: 'IM', decl_subtype: '4', procedure: '4000', procedure_add: '000', delivery_terms: 'CIF',
   invoice_currency: 'USD', exchange_rate: '15.42', consignee_code: 'C8888', declarant_code: 'C8888', mode_transport: '1', carrier_nationality: 'MV', country_of_export: 'CN', country_origin: 'CN' };
 
-const field = ([k, label, type, wide], val, attr) => `<div class="field${wide ? ' wide' : ''}"><label>${label}</label>
+const field = ([k, label, type, wide], val, attr, flagged = false) => `<div class="field${wide ? ' wide' : ''}"><label>${label}</label>
   <input ${attr}="${k}" type="${type === 'number' ? 'text' : type}" ${type === 'number' ? 'inputmode="decimal"' : ''} ${type === 'tel' ? 'inputmode="numeric"' : ''}
-    value="${esc(val ?? '')}" placeholder="${esc(PLACEHOLDERS[k] || '')}" autocomplete="off"></div>`;
+    value="${esc(val ?? '')}" placeholder="${esc(PLACEHOLDERS[k] || '')}" autocomplete="off"${flagged ? ' class="flag"' : ''}></div>`;
+
+// Fields a scan couldn't be sure of: shown highlighted with a note until edited.
+function itemFlags(it) {
+  const f = {}, notes = [];
+  if (it._scanned) {
+    if (!it.hs_code) { f.hs_code = true; notes.push('HS code not found — tap 🔎 on the review screen to look it up'); }
+    else if (it.hs_confidence !== 'high') { f.hs_code = true; notes.push(`HS code is a ${it.hs_confidence || 'low'}-confidence suggestion — check the tariff`); }
+    if (it.gross_mass_allocated) { f.gross_mass = true; notes.push('gross kg spread from the shipment total'); }
+  }
+  if (String(it.description || '').length > 49) { f.description = true; notes.push('description is over ASYCUDA\'s 49 characters'); }
+  return { f, notes };
+}
 
 let form = local.get('form') || { general: {}, items: [{}] };
 function renderForm() {
   $('formGeneral').innerHTML = FORM_MAIN.map((f) => field(f, form.general[f[0]], 'data-g')).join('');
   $('formGeneralMore').innerHTML = FORM_MORE.map((f) => field(f, form.general[f[0]], 'data-g')).join('');
-  $('formItems').innerHTML = form.items.map((it, i) => `<div class="fitem" style="--ic:${PALETTE[i % PALETTE.length]}">
+  $('formItems').innerHTML = form.items.map((it, i) => {
+    const { f: fl, notes } = itemFlags(it);
+    return `<div class="fitem" style="--ic:${PALETTE[i % PALETTE.length]}">
     <div class="fitem-h"><span>Item ${i + 1}</span><button class="link" data-del="${i}">Remove</button></div>
-    <div class="form-grid">${ITEM_FIELDS.map((f) => field(f, it[f[0]], `data-i${i}`)).join('')}</div></div>`).join('');
+    ${notes.length ? `<div class="fitem-note">⚠ ${esc(notes.join(' · '))}</div>` : ''}
+    <div class="form-grid">${ITEM_FIELDS.map((f) => field(f, it[f[0]], `data-i${i}`, !!fl[f[0]])).join('')}</div></div>`;
+  }).join('');
   $('formItemsCount').textContent = `${form.items.length} item(s)`;
 }
 function readForm() {
-  const g = {};
+  const g = extras(form.general, GENERAL_KEYS);
   document.querySelectorAll('[data-g]').forEach((el) => { if (el.value.trim() !== '') g[el.dataset.g] = el.value.trim(); });
-  const items = form.items.map((_, i) => {
-    const it = {};
+  const items = form.items.map((prev, i) => {
+    const it = extras(prev, ITEM_KEYS);
     document.querySelectorAll(`[data-i${i}]`).forEach((el) => { const k = el.getAttribute(`data-i${i}`); if (el.value.trim() !== '') it[k] = el.value.trim(); });
+    // An edited field counts as checked
+    if (it._scanned && String(it.hs_code || '') !== String(prev.hs_code || '')) it.hs_confidence = 'high';
+    if (it.gross_mass_allocated && String(it.gross_mass || '') !== String(prev.gross_mass || '')) delete it.gross_mass_allocated;
     return it;
   });
   form = { general: g, items: items.length ? items : [{}] };
@@ -357,7 +381,8 @@ function readForm() {
 function toData(f) {
   const numKeys = new Set([...FORM_MAIN, ...FORM_MORE, ...ITEM_FIELDS].filter((x) => x[2] === 'number').map((x) => x[0]));
   const conv = (o) => Object.fromEntries(Object.entries(o).map(([k, v]) => [k, numKeys.has(k) && core.parseNumber(v) !== null ? core.parseNumber(v) : v]));
-  return { general: conv(f.general), items: f.items.filter((it) => Object.keys(it).length).map(conv) };
+  const clean = (it) => Object.fromEntries(Object.entries(it).filter(([k]) => !k.startsWith('_') && k !== 'hs_confidence' && k !== 'gross_mass_allocated'));
+  return { general: conv(f.general), items: f.items.map(clean).filter((it) => Object.keys(it).length).map(conv) };
 }
 $('view-form').addEventListener('input', () => readForm());
 $('formItems').addEventListener('click', (e) => {
@@ -366,7 +391,7 @@ $('formItems').addEventListener('click', (e) => {
 });
 $('addItem').onclick = () => { readForm(); form.items.push({}); local.set('form', form); renderForm();
   const last = $('formItems').lastElementChild; last && last.scrollIntoView({ behavior: 'smooth', block: 'center' }); };
-$('formClear').onclick = () => { if (!confirm('Clear the whole form?')) return; form = { general: {}, items: [{}] }; local.set('form', form); renderForm(); };
+$('formClear').onclick = () => { if (!confirm('Clear the whole form?')) return; form = { general: {}, items: [{}] }; local.set('form', form); $('formScanNote').innerHTML = ''; renderForm(); };
 $('formReview').onclick = () => {
   readForm();
   const data = toData(form);
@@ -388,6 +413,121 @@ const SAMPLE = {
 };
 $('sampleBtn').onclick = () => setData(SAMPLE, 'Sample shipment (demo data)');
 $('formSample').onclick = () => { form = JSON.parse(JSON.stringify(SAMPLE)); local.set('form', form); renderForm(); toast('Sample filled — tap “Review & generate”.'); };
+
+// ── Scan ─────────────────────────────────────────────────────
+const scanState = { files: [], active: null, ctl: null, zoom: false };
+const allPages = () => scanState.files.flatMap((f) => f.pages);
+
+function refreshScanSettings() {
+  const has = !!scan.settings.key;
+  $('scanKeyState').textContent = has ? 'Claude reads the pages' : 'free reading on this phone';
+  $('scanEngineName').textContent = has ? 'Claude' : 'Free';
+}
+$('scanKey').value = scan.settings.key;
+$('scanModel').value = local.get('scanModel') || '';
+$('scanKey').addEventListener('input', () => { scan.settings.key = $('scanKey').value; refreshScanSettings(); });
+$('scanModel').addEventListener('input', () => { scan.settings.model = $('scanModel').value; });
+$('scanForget').onclick = () => { scan.settings.key = ''; $('scanKey').value = ''; refreshScanSettings(); toast('API key removed from this phone.'); };
+
+function scanStatus(msg, kind = 'busy') {
+  $('scanStatus').innerHTML = msg ? `<div class="scan-status${kind === 'bad' ? ' bad' : ''}">${kind === 'busy' ? '<span class="spin"></span>' : ''}<span>${esc(msg)}</span></div>` : '';
+}
+
+function renderScanPages() {
+  const pages = allPages();
+  const thumbs = (withRemove) => pages.map((p) => `<div class="scan-thumb${p.id === scanState.active ? ' active' : ''}" role="button" tabindex="0" data-page="${p.id}" title="${esc(p.name)}">
+    <img src="${p.url}" alt="">${withRemove ? `<button class="x" data-remove="${p.id}" aria-label="Remove">✕</button>` : ''}</div>`).join('');
+  $('scanThumbs').innerHTML = thumbs(true);
+  $('pagesThumbs').innerHTML = thumbs(false);
+  const active = pages.find((p) => p.id === scanState.active);
+  $('pagesImg').innerHTML = active ? `<img src="${active.url}" alt="${esc(active.name)}">` : '';
+  $('scanPageCount').textContent = pages.length;
+  $('scanReadBtn').disabled = !pages.length || !!scanState.ctl;
+  updatePagesFab();
+}
+function updatePagesFab(tab) {
+  const current = tab || (document.querySelector('.view.active') || {}).id?.replace('view-', '');
+  $('pagesFab').hidden = !(allPages().length && (current === 'form' || current === 'file'));
+  $('pagesFab').classList.toggle('raised', current === 'file' && !!state.data);
+}
+
+async function addScanFiles(list) {
+  const files = Array.from(list || []);
+  if (!files.length) return;
+  scanStatus('Preparing pages…');
+  const { files: ready, problems } = await scan.prepareFiles(files);
+  scanState.files.push(...ready);
+  if (!allPages().some((p) => p.id === scanState.active) && allPages().length) scanState.active = allPages()[0].id;
+  renderScanPages();
+  scanStatus(problems.join(' '), problems.length ? 'bad' : '');
+  if (ready.length && !problems.length) toast(`${allPages().length} page(s) ready — tap “Read documents”.`);
+}
+$('scanCamera').addEventListener('change', (e) => { addScanFiles(e.target.files); e.target.value = ''; });
+$('scanFiles').addEventListener('change', (e) => { addScanFiles(e.target.files); e.target.value = ''; });
+
+function pageClick(e) {
+  const rm = e.target.closest('[data-remove]');
+  if (rm) {
+    const id = +rm.dataset.remove;
+    const i = scanState.files.findIndex((f) => f.pages.some((p) => p.id === id));
+    if (i >= 0) { scanState.files[i].pages.forEach((p) => URL.revokeObjectURL(p.url)); scanState.files.splice(i, 1); }
+    if (!allPages().some((p) => p.id === scanState.active)) scanState.active = allPages()[0] ? allPages()[0].id : null;
+    renderScanPages(); return;
+  }
+  const t = e.target.closest('[data-page]');
+  if (t) { scanState.active = +t.dataset.page; renderScanPages(); if (e.currentTarget.id === 'scanThumbs') openPages(); }
+}
+$('scanThumbs').addEventListener('click', pageClick);
+$('pagesThumbs').addEventListener('click', pageClick);
+function openPages() { renderScanPages(); $('pagesView').hidden = false; }
+$('pagesFab').onclick = openPages;
+$('pagesClose').onclick = () => { $('pagesView').hidden = true; };
+$('pagesZoom').onclick = () => { scanState.zoom = !scanState.zoom; $('pagesImg').classList.toggle('zoom', scanState.zoom); $('pagesZoom').textContent = scanState.zoom ? 'Fit' : 'Zoom'; };
+
+$('scanStopBtn').onclick = () => scanState.ctl && scanState.ctl.abort();
+$('scanReadBtn').onclick = async () => {
+  if (!scanState.files.length || scanState.ctl) return;
+  scanState.ctl = new AbortController();
+  $('scanStopBtn').hidden = false; $('scanReadBtn').disabled = true; $('scanResult').innerHTML = '';
+  try {
+    const res = await scan.readDocuments(scanState.files, { progress: (m) => scanStatus(m), signal: scanState.ctl.signal });
+    scanStatus('');
+    showScanResult(res);
+  } catch (e) {
+    scanStatus(e.name === 'AbortError' ? 'Stopped.' : (e.message || String(e)), e.name === 'AbortError' ? '' : 'bad');
+  } finally {
+    scanState.ctl = null; $('scanStopBtn').hidden = true; renderScanPages();
+  }
+};
+
+function showScanResult(res) {
+  const items = res.items, cur = res.general.invoice_currency || '';
+  const total = items.reduce((s, it) => s + (it.item_price || 0), 0);
+  $('scanLineCount').textContent = items.length;
+  $('scanResult').innerHTML = `<div class="card">
+    <div class="card-h"><h2>Read ${res.engine === 'claude' ? 'by Claude' : 'on this phone'}</h2><span class="muted">${esc(res.invoice.invoice_no || '')}</span></div>
+    <div class="found"><div><b>${items.length}</b><span>lines</span></div><div><b>${money(total)}</b><span>${esc(cur || 'value')}</span></div>
+      <div><b>${items.filter((it) => it.hs_code).length}/${items.length}</b><span>HS codes</span></div></div>
+    <ul class="checks">${res.checks.map((c) => `<li class="${c.level}">${esc(c.text)}</li>`).join('')}</ul>
+    ${res.notes.length ? `<p class="hint">${res.notes.map(esc).join('<br>')}</p>` : ''}
+    ${items.length ? '<button class="btn primary full" id="scanToForm">Check in the form →</button>' : ''}</div>`;
+  if (items.length) $('scanToForm').onclick = () => scanToForm(res);
+}
+
+function scanToForm(res) {
+  const g = { ...res.general };
+  form = {
+    general: Object.fromEntries(Object.entries(g).map(([k, v]) => [k, String(v)])),
+    items: res.items.map((it) => ({ ...Object.fromEntries(Object.entries(it).map(([k, v]) => [k, typeof v === 'number' ? String(v) : v])), _scanned: true })),
+  };
+  local.set('form', form);
+  renderForm();
+  const flagged = res.items.filter((it) => itemFlags({ ...it, _scanned: true }).notes.length).length;
+  $('formScanNote').innerHTML = `<div class="alert warn">📷 <span>Filled from the scan (${res.items.length} line(s)). Check every value against the pages (📄 button)${flagged ? `; <b>${flagged} item(s)</b> have highlighted fields` : ''}. Add the consignee code and anything missing, then tap <b>Review &amp; generate</b>.</span></div>`;
+  go('form');
+}
+refreshScanSettings();
+renderScanPages();
 
 // ── History ──────────────────────────────────────────────────
 async function renderHistory() {
@@ -453,7 +593,7 @@ addEventListener('offline', () => { $('appSub').textContent = 'ASYCUDA SAD gener
 
 // ── Start ────────────────────────────────────────────────────
 $('appSub').textContent = `ASYCUDA SAD generator · ${navigator.onLine ? 'works offline' : 'offline mode'}`;
-$('versionInfo').textContent = `SAD Mobile v${VERSION} · runs entirely in your browser`;
+$('versionInfo').textContent = `SAD Mobile v${VERSION} · runs in your browser`;
 renderForm();
 refreshStats();
 loadModel().catch(() => {}); // warm the cache

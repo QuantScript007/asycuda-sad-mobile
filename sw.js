@@ -1,8 +1,9 @@
 // Offline support: cache the app shell (incl. the SheetJS library and the SAD
 // model) on install; serve from cache, refreshing in the background.
-const CACHE = 'sad-mobile-v1.1.0';
+const CACHE = 'sad-mobile-v1.2.0';
 const ASSETS = [
   './', 'index.html', 'css/app.css', 'js/app.js', 'js/sad-core.js', 'js/xls-template.js', 'js/store.js',
+  'js/scan.js', 'js/invoice-parse.js',
   'vendor/xlsx.full.min.js', 'templates/SAD_MODEL.xls', 'manifest.webmanifest',
   'icons/icon.svg', 'icons/icon-192.png', 'icons/icon-512.png',
 ];

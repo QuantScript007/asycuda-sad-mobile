@@ -1,9 +1,12 @@
 # SAD Mobile — ASYCUDA SAD generator for your phone
 
-Generate **ASYCUDA SAD import files on a phone**, in the browser. Open a filled SAD model or template, check the figures, type any missing duty rates, and download the **official ASYCUDA SAD model filled in** — ready to import.
+Generate **ASYCUDA SAD import files on a phone**, in the browser. **Scan the supplier's invoice**, or open a filled SAD model or template, check the figures, type any missing duty rates, and download the **official ASYCUDA SAD model filled in** — ready to import.
+
+**Open it: <https://quantscript007.github.io/asycuda-sad-mobile/>**
 
 - 📱 **Mobile web app** — no install needed; add it to the home screen to use it like an app.
-- 🔒 **Private** — files are read and created on the phone. Nothing is uploaded to any server.
+- 📷 **Scan invoices** — photograph or pick invoices, packing lists and B/Ls; the lines are read into the form.
+- 🔒 **Private** — files are read and created on the phone. Nothing is uploaded, unless you add an API key for Claude reading.
 - ✈️ **Works offline** after the first visit.
 - 📄 **Same output as the desktop app** — the SAD model keeps its dropdowns, field-hint comments, hidden currency columns and formatting.
 
@@ -23,6 +26,7 @@ Generate **ASYCUDA SAD import files on a phone**, in the browser. Open a filled 
 
 | Tab | |
 |---|---|
+| **📷 Scan** | Take photos or pick PDFs of the invoice (plus packing list / B/L). Free reading runs on the phone (OCR); with an Anthropic API key in *Reading settings*, Claude reads the pages, merges packing lists and suggests HS codes. The result opens in the Form with doubtful fields highlighted, and a 📄 Pages button to check against the documents. |
 | **📁 File** | Open an `.xls` / `.xlsx` from the phone (Files, Drive, WhatsApp downloads…): the SAD model, the simple template, or a SAD made earlier. |
 | **Review** | Shipment details, tariff switch (**General / SAFTA / CMFTA**), insights — goods, duty & effective rate, CIF, landed cost, mass, cost build-up, duty by HS chapter, value by origin, rate bands, top duty items, invoice / package checks — and every item with an editable duty rate and a 🔎 link to the Maldives Customs tariff search. |
 | **⚡ Generate** | Download or **share** (WhatsApp, email, Drive…) the filled **SAD model** and the **duty worksheet**. |
@@ -73,6 +77,8 @@ Plain HTML/CSS/JavaScript — no build step.
 index.html            the app (4 tabs + result sheet)
 css/app.css           mobile-first styles, light & dark
 js/app.js             UI
+js/scan.js            Scan tab: PDF pages (pdf.js), OCR (Tesseract.js) or Claude, loaded on first use
+js/invoice-parse.js   invoice text / Claude reply → SAD fields, with checks (port of the desktop invoice_scan.py)
 js/sad-core.js        read workbooks, duty, analytics, fill the SAD model, duty worksheet
 js/xls-template.js    edits .xls cells in place so dropdowns & comments survive
 js/store.js           history (IndexedDB) and form draft (localStorage)

@@ -236,7 +236,7 @@ details.more .form-grid { margin-top: 8px; }
 .action-bar .btn { flex: 1; white-space: nowrap; }
 
 /* Tab bar */
-.tabbar { position: fixed; left: 0; right: 0; bottom: 0; z-index: 30; display: grid; grid-template-columns: repeat(4, 1fr);
+.tabbar { position: fixed; left: 0; right: 0; bottom: 0; z-index: 30; display: grid; grid-template-columns: repeat(5, 1fr);
   background: var(--card); box-shadow: 0 -1px 0 var(--border); padding-bottom: var(--safe-b); }
 .tabbar button { border: 0; background: none; padding: 8px 0 9px; font: inherit; font-size: 11px; font-weight: 700; color: var(--muted);
   display: flex; flex-direction: column; align-items: center; gap: 1px; }
@@ -266,3 +266,38 @@ details.more .form-grid { margin-top: 8px; }
   .kpis { grid-template-columns: repeat(3, 1fr); }
   .form-grid { grid-template-columns: repeat(3, 1fr); }
 }
+
+/* ── Scan ─────────────────────────────────────────────────── */
+.pick-half { padding: 16px 10px; margin: 0; }
+.pick-half .pick-icon { width: 44px; height: 44px; font-size: 20px; margin-bottom: 6px; }
+.scan-thumbs { display: flex; flex-wrap: wrap; gap: 8px; margin: 4px 0; }
+.scan-thumb { position: relative; width: 64px; height: 84px; border-radius: 10px; overflow: hidden; border: 1px solid var(--border); background: var(--soft); padding: 0; }
+.scan-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.scan-thumb.active { outline: 2px solid var(--pink); outline-offset: 1px; }
+.scan-thumb .x { position: absolute; top: 3px; right: 3px; width: 22px; height: 22px; border: 0; border-radius: 6px; background: rgba(15,23,42,.8); color: #fff; font-size: 12px; line-height: 22px; padding: 0; }
+.scan-status { display: flex; gap: 10px; align-items: center; border-radius: 14px; padding: 10px 12px; font-size: 13px; margin: 10px 0; background: var(--card); box-shadow: var(--shadow); }
+.scan-status.bad { background: var(--bad-soft); color: var(--bad); box-shadow: none; }
+.spin { width: 16px; height: 16px; flex: none; border-radius: 50%; border: 2px solid var(--track); border-top-color: var(--pink); animation: spin .8s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .spin { animation: none; } }
+.checks { list-style: none; margin: 8px 0 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.checks li { border-radius: 10px; padding: 7px 10px; font-size: 13px; }
+.checks li.ok { background: var(--ok-soft); color: var(--ok); }
+.checks li.warn { background: var(--warn-soft); color: var(--warn); }
+.checks li.err { background: var(--bad-soft); color: var(--bad); }
+.found { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.found div { background: var(--soft); border-radius: 12px; padding: 8px 10px; min-width: 0; }
+.found b { display: block; font-size: 16px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.found span { font-size: 10.5px; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; font-weight: 700; }
+.field input.flag { border-color: var(--warn) !important; background: var(--warn-soft) !important; }
+.fitem-note { font-size: 12px; color: var(--warn); margin: -2px 0 8px; }
+.pages-fab { position: fixed; right: 14px; bottom: calc(76px + env(safe-area-inset-bottom, 0px)); z-index: 35; border: 0; border-radius: 999px; padding: 10px 14px;
+  font: inherit; font-weight: 800; color: #fff; background: var(--g-cool); box-shadow: 0 6px 18px rgba(59,130,246,.35); }
+.pages-view { position: fixed; inset: 0; z-index: 60; background: var(--bg); display: flex; flex-direction: column; gap: 8px;
+  padding: calc(10px + env(safe-area-inset-top, 0px)) 16px calc(10px + env(safe-area-inset-bottom, 0px)); }
+.pages-bar { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.pages-bar .btn { padding: 8px 12px; }
+.pages-img { flex: 1; overflow: auto; border-radius: 12px; background: var(--soft); border: 1px solid var(--border); }
+.pages-img img { display: block; width: 100%; max-width: none; }
+.pages-img.zoom img { width: 220%; }
+.pages-fab.raised { bottom: calc(150px + env(safe-area-inset-bottom, 0px)); }

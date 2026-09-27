@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#EC4899">
-<meta name="description" content="Generate ASYCUDA SAD import files on your phone — works offline, files never leave your device.">
+<meta name="description" content="Scan an invoice or open an Excel file and generate the ASYCUDA SAD import file on your phone.">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -33,8 +33,56 @@
 
 <main id="main">
 
+  <!-- ───────── SCAN TAB ───────── -->
+  <section class="view active" id="view-scan">
+    <div class="hero">
+      <h1>Scan an invoice</h1>
+      <p>Photograph or pick the supplier's invoice, and the packing list or B/L if you have them. The lines are read into the SAD form for you to check.</p>
+      <div class="hero-stats">
+        <div><b id="scanEngineName">Free</b><span>reading</span></div>
+        <div><b id="scanPageCount">0</b><span>pages</span></div>
+        <div><b id="scanLineCount">–</b><span>lines read</span></div>
+      </div>
+    </div>
+
+    <div class="row-btns">
+      <label class="pick pick-half">
+        <input type="file" id="scanCamera" accept="image/*" capture="environment">
+        <div class="pick-icon">📷</div>
+        <div class="pick-title">Take photo</div>
+        <div class="pick-sub">one page at a time</div>
+      </label>
+      <label class="pick pick-half">
+        <input type="file" id="scanFiles" accept="application/pdf,.pdf,image/jpeg,image/png,image/webp" multiple>
+        <div class="pick-icon">📄</div>
+        <div class="pick-title">Choose files</div>
+        <div class="pick-sub">PDF or photos</div>
+      </label>
+    </div>
+
+    <div class="scan-thumbs" id="scanThumbs"></div>
+    <div class="row-btns" style="grid-template-columns: 1fr auto">
+      <button class="btn primary" id="scanReadBtn" disabled>🔎 Read documents</button>
+      <button class="btn ghost" id="scanStopBtn" hidden>Stop</button>
+    </div>
+    <div id="scanStatus"></div>
+    <div id="scanResult"></div>
+
+    <details class="card more" id="scanSettings">
+      <summary>Reading settings · <span id="scanKeyState">free reading</span></summary>
+      <p class="hint"><b>Free reading</b> runs on this phone. Clear, typed invoices work well; handwriting, stamps and crooked photos don't, and packing lists aren't merged.</p>
+      <p class="hint"><b>With an Anthropic API key</b>, Claude reads the pages, merges packing-list weights onto the lines and suggests HS codes. Get a key at console.anthropic.com; reads are billed to it. The key stays on this phone.</p>
+      <div class="form-grid">
+        <div class="field wide"><label for="scanKey">Anthropic API key</label><input id="scanKey" type="password" autocomplete="off" placeholder="sk-ant-…"></div>
+        <div class="field wide"><label for="scanModel">Model</label><input id="scanModel" type="text" autocomplete="off" placeholder="claude-sonnet-5"></div>
+      </div>
+      <button class="btn ghost full" id="scanForget" type="button">Forget key</button>
+    </details>
+    <div class="spacer"></div>
+  </section>
+
   <!-- ───────── FILE TAB ───────── -->
-  <section class="view active" id="view-file">
+  <section class="view" id="view-file">
     <div class="hero">
       <h1>Generate a SAD on your phone</h1>
       <p>Open your filled SAD model or template, check the figures, and download the ASYCUDA file. Nothing is uploaded — it all runs on this device.</p>
@@ -92,6 +140,7 @@
 
   <!-- ───────── FORM TAB ───────── -->
   <section class="view" id="view-form">
+    <div id="formScanNote"></div>
     <div class="card">
       <div class="card-h"><h2>Shipment</h2><button class="link" id="formSample">Fill sample</button></div>
       <div class="form-grid" id="formGeneral"></div>
@@ -134,7 +183,7 @@
     <div class="card steps">
       <h2>How it works</h2>
       <ol>
-        <li><b>Fill</b> the SAD model (or simple template) in Excel, WPS or Google Sheets — or use the <b>Form</b> tab.</li>
+        <li><b>Scan</b> the supplier's invoice on the Scan tab — or fill the SAD model in Excel, or use the <b>Form</b> tab.</li>
         <li><b>Open</b> it on the File tab. Check the insights and type any missing duty rates.</li>
         <li><b>Generate</b> and download or share the SAD. It is the official model, filled in — ready to import into ASYCUDA.</li>
       </ol>
@@ -142,7 +191,7 @@
     <div class="card">
       <h2>Good to know</h2>
       <ul class="bullets">
-        <li><b>Private:</b> files are read and created on this phone only. Nothing is uploaded.</li>
+        <li><b>Private:</b> files are read and created on this phone. Free scanning also runs on the phone; with an API key, the scanned pages are sent to Anthropic to be read.</li>
         <li><b>Offline:</b> after the first visit the app works without internet. Add it to your home screen from the browser menu.</li>
         <li><b>Duty rates:</b> come from your file or what you type — the phone can't look them up automatically. Use 🔎 to open the customs tariff.</li>
         <li><b>Limits (ASYCUDA):</b> description 49 characters, brand/model/size 24, packing codes 5 — longer text is shortened with a warning.</li>
@@ -161,7 +210,8 @@
 
 <!-- Bottom navigation -->
 <nav class="tabbar">
-  <button class="active" data-go="file"><span>📁</span>File</button>
+  <button class="active" data-go="scan"><span>📷</span>Scan</button>
+  <button data-go="file"><span>📁</span>File</button>
   <button data-go="form"><span>✍️</span>Form</button>
   <button data-go="history"><span>🗂</span>History</button>
   <button data-go="help"><span>❓</span>Help</button>
@@ -184,6 +234,14 @@
     </div>
     <button class="btn link full" id="closeSheet">Close</button>
   </div>
+</div>
+
+<!-- Scanned pages viewer -->
+<button class="pages-fab" id="pagesFab" hidden>📄 Pages</button>
+<div class="pages-view" id="pagesView" hidden>
+  <div class="pages-bar"><b>Scanned pages</b><span><button class="btn ghost" id="pagesZoom">Zoom</button> <button class="btn primary" id="pagesClose">Close</button></span></div>
+  <div class="scan-thumbs" id="pagesThumbs"></div>
+  <div class="pages-img" id="pagesImg"></div>
 </div>
 
 <div class="toast" id="toast" hidden></div>
